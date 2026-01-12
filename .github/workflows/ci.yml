@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  generate-matrix:
+    name: Generate matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Generate matrix JSON
+        id: gen
+        run: |
+          python tools/gen_matrix.py > matrix.json
+          echo "matrix=$(cat matrix.json)" >> $GITHUB_OUTPUT
+
+  test-xdist:
+    name: Test (xdist) - ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-${{ matrix.browser }}-${{ hashFiles('**/requirements.txt') }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright browser
+        run: |
+          python -m playwright install ${{ matrix.browser }}
+      - name: Create reports dir
+        run: mkdir -p reports
+      - name: Run tests (xdist) with logging
+        run: |
+          python tools/run_pytest_and_log.py -q -n auto --browser=${{ matrix.browser }} --junitxml=reports/junit-${{ matrix.browser }}.xml --html=reports/html-${{ matrix.browser }}.html
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.browser }}
+          path: reports/
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.browser }}
+          path: logs/
+
+  sharded-tests:
+    name: Sharded tests (browser=${{ matrix.browser }}, shard=${{ matrix.shard }})
+    needs: generate-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 6
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+    env:
+      # default, overridden per-job by matrix.total_shards
+      TOTAL_SHARDS: ${{ matrix.total_shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}-shard-${{ matrix.shard }}
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-ms-playwright-${{ matrix.browser }}-shard-${{ matrix.shard }}-${{ hashFiles('**/requirements.txt') }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install Playwright browser
+        run: |
+          python -m playwright install ${{ matrix.browser }}
+      - name: Select tests for shard
+        id: select
+        run: |
+          echo "TOTAL_SHARDS=${{ env.TOTAL_SHARDS }}"
+          TESTS=$(python tools/split_tests.py --shard ${{ matrix.shard }} --total ${{ env.TOTAL_SHARDS }})
+          echo "tests=$TESTS" >> $GITHUB_OUTPUT
+      - name: Create reports dir
+        run: mkdir -p reports
+      - name: Run shard tests with logging
+        if: steps.select.outputs.tests != ''
+        run: |
+          echo "Running shard ${{ matrix.shard }} for browser ${{ matrix.browser }}"
+          python tools/run_pytest_and_log.py -q -n auto ${{ steps.select.outputs.tests }} --browser=${{ matrix.browser }} --junitxml=reports/junit-${{ matrix.browser }}-shard-${{ matrix.shard }}.xml --html=reports/html-${{ matrix.browser }}-shard-${{ matrix.shard }}.html
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.browser }}-shard-${{ matrix.shard }}
+          path: reports/
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.browser }}-shard-${{ matrix.shard }}
+          path: logs/
+      - name: Skip if no tests
+        if: steps.select.outputs.tests == ''
+        run: echo "No tests assigned to this shard"
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.browser }}-shard-${{ matrix.shard }}
+          path: reports/

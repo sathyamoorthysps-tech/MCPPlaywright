@@ -1,0 +1,41 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run pytest and save log (interactive)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe tools/run_pytest_and_log.py -q -s --browser=chromium --headed -k iphone",
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "Run pytest and save log (custom args)",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe tools/run_pytest_and_log.py",
+      "args": [],
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+    ,
+    {
+      "label": "Run local sharded matrix",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe tools/run_local_matrix.py",
+      "args": ["--headed"],
+      "problemMatcher": [],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}
